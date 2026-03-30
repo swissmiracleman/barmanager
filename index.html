@@ -1,0 +1,1549 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bar Manager 2025</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .glass-panel { background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        input, select, textarea { color-scheme: dark; }
+        .custom-checkbox { cursor: pointer; appearance: none; width: 1.5rem; height: 1.5rem; border: 2px solid #4b5563; border-radius: 0.5rem; display: grid; place-content: center; transition: all 0.2s; }
+        .custom-checkbox::before { content: ""; width: 0.75rem; height: 0.75rem; transform: scale(0); transition: 120ms transform ease-in-out; box-shadow: inset 1em 1em white; transform-origin: center; clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%); }
+        .custom-checkbox:checked { background-color: #10b981; border-color: #10b981; }
+        .custom-checkbox:checked::before { transform: scale(1); }
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-200 min-h-screen pb-24 selection:bg-amber-500/30">
+
+    <div id="root">
+        <div class="flex items-center justify-center min-h-screen text-slate-500">
+            <div class="text-center">
+                <div class="animate-spin mb-4 text-amber-500 text-4xl">⟳</div>
+                <p>App wird geladen...</p>
+                <p class="text-xs mt-2 text-slate-600">Bitte warten (Initialisierung)</p>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, setDoc, deleteDoc, onSnapshot, query, serverTimestamp, writeBatch, orderBy, limit, addDoc, increment, where, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+        const firebaseConfig = {
+          apiKey: "AIzaSyAz37nu77bSTe-NumPfUOk9qs1xpyPll9w",
+          authDomain: "bar-manager-7781f.firebaseapp.com",
+          projectId: "bar-manager-7781f",
+          storageBucket: "bar-manager-7781f.firebasestorage.app",
+          messagingSenderId: "992811966550",
+          appId: "1:992811966550:web:a76d2fe2af89ee70e99bf7"
+        };
+
+        async function initFirebase() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                const auth = getAuth(app);
+                const db = initializeFirestore(app, {
+                    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+                });
+                console.log("Offline-Datenbank aktiviert (Multi-Tab).");
+
+                window.fb = { auth, db, signInAnonymously, onAuthStateChanged, collection, doc, setDoc, deleteDoc, onSnapshot, query, serverTimestamp, writeBatch, orderBy, limit, addDoc, increment, where, getDocs, config: firebaseConfig, writeBatch };
+                
+                window.dispatchEvent(new Event('firebase-ready'));
+
+            } catch (e) {
+                console.error("Fataler Startfehler:", e);
+                window.dispatchEvent(new Event('firebase-ready'));
+            }
+        }
+
+        initFirebase();
+    </script>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        const DEFAULT_CATS = ['Sonstiges','Whiskey','Gin','Vodka','Rum','Wein','Bier','Softdrink','Alkoholfrei'];
+
+        const Icon = ({ name, size = 24, className }) => {
+            const spanRef = useRef(null);
+            
+            useEffect(() => { 
+                if(window.lucide && spanRef.current) {
+                    spanRef.current.innerHTML = `<i data-lucide="${name}" class="${className || ''}" style="width:${size}px; height:${size}px;"></i>`;
+                    window.lucide.createIcons({
+                        root: spanRef.current,
+                        nameAttr: 'data-lucide',
+                        attrs: { class: className, width: size, height: size }
+                    });
+                }
+            }, [name, size, className]);
+
+            return <span ref={spanRef} className="inline-flex items-center justify-center"></span>;
+        };
+
+        const KpiBox = ({ title, val, color, icon }) => (
+            <div className="glass-panel p-5 rounded-xl flex justify-between items-center shadow-lg">
+                <div><p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-1">{title}</p><p className={`text-2xl font-mono font-bold ${color}`}>{val}</p></div>
+                <div className={`p-3 rounded-xl bg-slate-900/50 ${color.replace('text-', 'bg-').replace('400', '400/10').replace('500', '500/10')}`}><Icon name={icon} size={24} className={color} /></div>
+            </div>
+        );
+
+        const DashboardContent = ({stats, vatRate, setVatRate, consumptionStats, consumptionPeriod, setConsumptionPeriod, consumptionLoading}) => {
+            const vatAmount = stats.totalValue * (vatRate / 100);
+            const grossTotal = stats.totalValue + vatAmount;
+
+            const exportDashboard = () => {
+                const dateStr = new Date().toLocaleDateString('de-CH');
+                let csv = `INVENTUR ABSCHLUSS;${dateStr}\n\n`;
+                
+                csv += `ZUSAMMENFASSUNG\n`;
+                csv += `Total Flaschen;${stats.totalBottles.toFixed(1).replace('.', ',')}\n`;
+                csv += `Warenwert Netto;${stats.totalValue.toFixed(2).replace('.', ',')} CHF\n`;
+                csv += `MwSt Satz;${vatRate} %\n`;
+                csv += `MwSt Betrag;${vatAmount.toFixed(2).replace('.', ',')} CHF\n`;
+                csv += `Warenwert Brutto;${grossTotal.toFixed(2).replace('.', ',')} CHF\n\n`;
+
+                csv += `DETAILS PRO KATEGORIE\n`;
+                csv += `Kategorie;Anzahl;Wert (Netto)\n`;
+
+                Object.entries(stats.catStats)
+                    .sort(([,a],[,b]) => b.value - a.value)
+                    .forEach(([cat, data]) => {
+                        csv += `"${cat}";${data.count.toFixed(1).replace('.', ',')};${data.value.toFixed(2).replace('.', ',')}\n`;
+                    });
+
+                const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = `Inventur_Abschluss_${new Date().toISOString().slice(0,10)}.csv`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            return (
+                <div className="space-y-6 animate-in slide-in-from-bottom-2">
+                    <div className="glass-panel p-6 rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 border-indigo-500/30">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                            <div><h2 className="text-slate-400 font-bold uppercase tracking-wider text-xs mb-1">Netto Warenwert</h2><div className="text-3xl md:text-4xl font-mono font-bold text-white flex items-baseline gap-2">{stats.totalValue.toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-sm text-slate-500">CHF</span></div></div>
+                            <div className="flex flex-wrap gap-3 items-center">
+                                <div className="flex items-center gap-3 bg-slate-950/50 p-3 rounded-xl border border-slate-800">
+                                    <div className="text-right"><label className="text-[10px] text-slate-500 uppercase font-bold block">MwSt %</label><input type="number" value={vatRate} onChange={e => setVatRate(parseFloat(e.target.value) || 0)} className="bg-transparent text-right text-white font-bold w-16 outline-none border-b border-slate-600 focus:border-amber-500" /></div>
+                                    <div className="h-8 w-px bg-slate-700"></div>
+                                    <div className="text-right"><div className="text-[10px] text-slate-500 uppercase font-bold">Brutto Total</div><div className="text-amber-400 font-mono font-bold">{grossTotal.toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div></div>
+                                </div>
+                                <button onClick={exportDashboard} className="bg-slate-800 hover:bg-slate-700 text-white p-3 rounded-xl border border-slate-700 flex items-center justify-center transition-colors" title="Inventur Exportieren"><Icon name="download" size={20} /></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <KpiBox title="Flaschen" val={Math.round(stats.totalBottles * 10) / 10} color="text-indigo-400" icon="layers" />
+                        <KpiBox title="Nachbestellen" val={stats.lowStockItems.length} color="text-red-500" icon="alert-triangle" />
+                        <KpiBox title="Kategorien" val={Object.keys(stats.catStats).length} color="text-amber-400" icon="tags" />
+                    </div>
+                    <div className="glass-panel p-6 rounded-xl">
+                        <h3 className="text-xs font-bold text-slate-500 uppercase mb-6 tracking-widest flex items-center justify-between"><span>Bestand & Wert pro Kategorie</span></h3>
+                        <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+                            {Object.entries(stats.catStats).sort(([,a],[,b]) => b.value - a.value).map(([cat, data]) => (
+                                <div key={cat} className="group">
+                                    <div className="flex justify-between items-end mb-1.5">
+                                        <span className="text-sm font-bold text-slate-200">{cat}</span>
+                                        <div className="text-right">
+                                            <span className="text-xs text-slate-400 mr-3">{Math.round(data.count * 10) / 10} Fl.</span>
+                                            <span className="text-sm font-mono font-bold text-emerald-400">{data.value.toLocaleString('de-CH', { minimumFractionDigits: 2 })}</span>
+                                        </div>
+                                    </div>
+                                    <div className="h-2 bg-slate-800 rounded-full overflow-hidden relative">
+                                        <div className="h-full bg-gradient-to-r from-indigo-600 to-indigo-400" style={{width: `${(data.value/Math.max(stats.totalValue,1))*100}%`}}></div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="glass-panel p-6 rounded-xl">
+                        <div className="flex items-center justify-between mb-6">
+                            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Verbrauchsstatistik</h3>
+                            <select value={consumptionPeriod} onChange={e => setConsumptionPeriod(Number(e.target.value))} className="bg-slate-900 border border-slate-700 text-white text-xs rounded-lg px-3 py-2 outline-none focus:border-amber-500">
+                                <option value={1}>1 Monat</option>
+                                <option value={3}>3 Monate</option>
+                                <option value={6}>6 Monate</option>
+                                <option value={12}>12 Monate</option>
+                            </select>
+                        </div>
+                        {consumptionLoading ? (
+                            <p className="text-slate-500 text-sm text-center py-8"><span className="animate-spin inline-block mr-2">⟳</span>Laden...</p>
+                        ) : consumptionStats.ranked.length === 0 ? (
+                            <p className="text-center text-slate-500 py-8">Keine Verbrauchsdaten für diesen Zeitraum.</p>
+                        ) : (
+                            <React.Fragment>
+                                <div className="grid grid-cols-2 gap-4 mb-6">
+                                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                                        <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Total Verbrauch</p>
+                                        <p className="text-2xl font-mono font-bold text-rose-400">{consumptionStats.totalConsumed.toFixed(1)} <span className="text-sm text-slate-500">Fl.</span></p>
+                                    </div>
+                                    <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                                        <p className="text-[10px] text-slate-500 uppercase font-bold mb-1">Ø pro Monat</p>
+                                        <p className="text-2xl font-mono font-bold text-amber-400">{consumptionStats.avgPerMonth.toFixed(1)} <span className="text-sm text-slate-500">Fl.</span></p>
+                                    </div>
+                                </div>
+                                <h4 className="text-[10px] text-slate-500 uppercase font-bold mb-3 tracking-wider">Top Verbrauch</h4>
+                                <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                                    {consumptionStats.ranked.slice(0, 15).map((item, i) => (
+                                        <div key={item.name} className="group">
+                                            <div className="flex justify-between items-end mb-1">
+                                                <span className="text-sm text-slate-200"><span className="text-slate-500 font-mono mr-2">{i+1}.</span>{item.name}</span>
+                                                <div className="text-right text-xs">
+                                                    <span className="text-slate-400 mr-3">Ø {item.avgPerMonth.toFixed(1)} /Mt</span>
+                                                    <span className="font-mono font-bold text-rose-400">{item.total.toFixed(1)} Fl.</span>
+                                                </div>
+                                            </div>
+                                            <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                                <div className="h-full bg-gradient-to-r from-rose-600 to-rose-400" style={{width: `${(item.total / Math.max(consumptionStats.ranked[0]?.total, 1)) * 100}%`}}></div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </React.Fragment>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const ItemCard = ({ item, onUpd, onDel, onEdit, onInfo, consumptionAvg }) => {
+            const isLow = (parseFloat(item.stock)||0) < (parseFloat(item.min)||0); 
+            const pricePerCl = (item.price && item.size && parseFloat(item.size) > 0) ? (parseFloat(item.price) / parseFloat(item.size)).toFixed(2) : null;
+            return (
+                <div className={`glass-panel p-4 rounded-xl relative group transition-all duration-300 hover:-translate-y-1 hover:shadow-xl ${isLow ? 'border-amber-500/30 bg-amber-500/5' : 'hover:border-slate-600'}`}>
+                    <div className="flex justify-between items-start mb-2">
+                        <div className="flex flex-wrap gap-2">
+                            <span className="text-[10px] font-bold bg-slate-900/80 px-2 py-1 rounded text-slate-400 border border-slate-700">{item.category}</span>
+                            {item.supplier && <span className="text-[10px] font-bold bg-slate-900/50 px-2 py-1 rounded text-slate-500 border border-slate-800">{item.supplier}</span>}
+                        </div>
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {item.info && (
+                                <button onClick={() => onInfo(item)} className="text-slate-500 hover:text-amber-400 p-1">
+                                    <Icon name="info" size={14} />
+                                </button>
+                            )}
+                            <button onClick={() => onEdit(item)} className="text-slate-500 hover:text-white p-1"><Icon name="pencil" size={14} /></button>
+                            <button onClick={() => onDel(item.id, item.name)} className="text-slate-500 hover:text-red-500 p-1"><Icon name="trash-2" size={14} /></button>
+                        </div>
+                    </div>
+                    <h3 className="font-bold text-white text-lg mb-1 truncate leading-tight" title={item.name}>{item.name}</h3>
+                    <div className="text-xs text-slate-400 mb-4 flex flex-wrap items-center gap-2">
+                        {item.size && <span className="bg-slate-800 px-1.5 rounded">{item.size} cl</span>}
+                        {item.price && <span className="text-emerald-400">{parseFloat(item.price).toFixed(2)} CHF</span>}
+                        {pricePerCl && <span className="text-slate-400 border-l border-slate-600 pl-2">({pricePerCl} / cl)</span>}
+                        {item.boxBarcode && (
+                            <span className="text-[10px] font-bold bg-indigo-900/40 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-700/50 ml-auto flex items-center gap-1" title="Karton Barcode hinterlegt">
+                                <Icon name="package" size={10} /> {item.boxQuantity || 6}
+                            </span>
+                        )}
+                        {consumptionAvg != null && consumptionAvg > 0 && (
+                            <span className="text-rose-400/70 text-[10px] border-l border-slate-600 pl-2">Ø {consumptionAvg.toFixed(1)} Fl./Mt</span>
+                        )}
+                    </div>
+                    <div className="flex justify-between items-end mt-auto"><div className="flex items-center gap-1 bg-slate-950 rounded-lg p-1 border border-slate-800 shadow-inner"><button onClick={()=>onUpd(item.id, item.stock||0, -0.5, item.name)} className="w-8 h-8 flex items-center justify-center rounded hover:bg-red-500/20 hover:text-red-500 text-slate-500 transition-colors"><Icon name="minus" size={18}/></button><span className={`w-8 text-center font-mono font-bold text-lg ${isLow?'text-amber-500':'text-white'}`}>{parseFloat(item.stock||0)}</span><button onClick={()=>onUpd(item.id, item.stock||0, 0.5, item.name)} className="w-8 h-8 flex items-center justify-center rounded hover:bg-green-500/20 hover:text-green-500 text-slate-500 transition-colors"><Icon name="plus" size={18}/></button></div><div className="text-right"><span className="text-[9px] text-slate-600 uppercase block font-bold">Min</span><span className="text-xs text-slate-500 font-mono">{item.min}</span></div></div>
+                </div>
+            );
+        };
+
+        const InfoModal = ({ isOpen, onClose, item }) => {
+            if (!isOpen || !item) return null;
+            return (
+                <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in">
+                    <div className="glass-panel bg-slate-900 w-full max-w-sm p-6 rounded-2xl shadow-2xl border border-slate-700">
+                        <h3 className="font-bold text-xl text-white mb-4 flex items-center gap-2">
+                            <Icon name="info" className="text-amber-500"/>
+                            {item.name}
+                        </h3>
+                        <div className="text-slate-300 text-sm whitespace-pre-wrap leading-relaxed max-h-[60vh] overflow-y-auto mb-6 bg-slate-950/50 p-4 rounded-lg border border-slate-800">
+                            {item.info || "Keine Informationen hinterlegt."}
+                        </div>
+                        <button onClick={onClose} className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl transition-colors">
+                            Schließen
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        const FilterModal = ({ isOpen, onClose, filters, setFilters, suppliers }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in">
+                    <div className="glass-panel bg-slate-900 w-full max-w-sm p-6 rounded-2xl shadow-2xl border border-slate-700">
+                        <h3 className="font-bold text-xl text-white mb-6 flex items-center gap-2">
+                            <Icon name="filter" /> Filter & Sortierung
+                        </h3>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs text-slate-500 uppercase font-bold ml-1">Sortierung</label>
+                                <select className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white outline-none focus:border-amber-500" 
+                                        value={filters.sort} 
+                                        onChange={e => setFilters({...filters, sort: e.target.value})}>
+                                    <option value="name_asc">Name (A-Z)</option>
+                                    <option value="name_desc">Name (Z-A)</option>
+                                    <option value="price_desc">Preis (Höchster zuerst)</option>
+                                    <option value="price_asc">Preis (Niedrigster zuerst)</option>
+                                    <option value="stock_asc">Bestand (Niedrigster zuerst)</option>
+                                    <option value="stock_desc">Bestand (Höchster zuerst)</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="text-xs text-slate-500 uppercase font-bold ml-1">Lieferant</label>
+                                <select className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white outline-none focus:border-amber-500" 
+                                        value={filters.supplier} 
+                                        onChange={e => setFilters({...filters, supplier: e.target.value})}>
+                                    <option value="">Alle Lieferanten</option>
+                                    {suppliers.map(s => <option key={s.id} value={s.label}>{s.label}</option>)}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="text-xs text-slate-500 uppercase font-bold ml-1">Barcode Status</label>
+                                <select className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white outline-none focus:border-amber-500" 
+                                        value={filters.barcode} 
+                                        onChange={e => setFilters({...filters, barcode: e.target.value})}>
+                                    <option value="all">Alle Artikel</option>
+                                    <option value="has">Mit Barcode / VPE</option>
+                                    <option value="missing">Ohne Barcode</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="text-xs text-slate-500 uppercase font-bold ml-1">Info Status</label>
+                                <select className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white outline-none focus:border-amber-500" 
+                                        value={filters.info} 
+                                        onChange={e => setFilters({...filters, info: e.target.value})}>
+                                    <option value="all">Alle Artikel</option>
+                                    <option value="has">Mit Info</option>
+                                    <option value="missing">Ohne Info</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 mt-8">
+                            <button onClick={() => { setFilters({ sort: 'name_asc', supplier: '', barcode: 'all', info: 'all' }); onClose(); }} className="flex-1 py-3 text-slate-400 font-bold hover:text-white transition-colors">Reset</button>
+                            <button onClick={onClose} className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold rounded-lg shadow-lg">Anwenden</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ScanResultModal = ({ data, onClose, onConsume, onInfo }) => {
+            const [qty, setQty] = useState(1);
+            if (!data || !data.item) return null;
+            
+            const item = data.item;
+            const isBox = data.isBox;
+            const boxQty = parseInt(item.boxQuantity) || 6;
+            const multiplier = isBox ? boxQty : 1;
+            
+            const safeQty = parseInt(qty) || 1;
+            const totalToConsume = safeQty * multiplier;
+
+            return (
+                <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in">
+                    <div className="glass-panel bg-slate-900 w-full max-w-sm p-6 rounded-2xl shadow-2xl border border-slate-700 text-center">
+                        <div className="text-emerald-400 mb-4 flex justify-center">
+                            <Icon name={isBox ? "package" : "scan-barcode"} size={48} />
+                        </div>
+                        
+                        {isBox && (
+                            <div className="inline-block bg-indigo-500/20 text-indigo-400 text-xs font-bold px-3 py-1 rounded-full mb-3 border border-indigo-500/30">
+                                📦 Karton gescannt ({boxQty} Flaschen)
+                            </div>
+                        )}
+                        
+                        <h3 className="font-bold text-2xl text-white mb-1 leading-tight">{item.name}</h3>
+                        <p className="text-slate-400 text-sm mb-6">Aktueller Bestand: <span className="text-white font-bold">{item.stock}</span></p>
+                        
+                        <div className="mb-6 bg-slate-950/80 p-4 rounded-xl border border-slate-800 shadow-inner">
+                            <label className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-3 block">
+                                {isBox ? 'Anzahl Kartons wählen' : 'Anzahl Flaschen wählen'}
+                            </label>
+                            <div className="flex items-center justify-center gap-4">
+                                <button onClick={() => setQty(Math.max(1, safeQty - 1))} className="w-14 h-14 rounded-xl bg-slate-800 text-white font-bold text-3xl hover:bg-slate-700 active:scale-95 flex items-center justify-center border border-slate-700 shadow-md">-</button>
+                                <input 
+                                    type="number" 
+                                    value={qty} 
+                                    onChange={e => setQty(e.target.value === '' ? '' : parseInt(e.target.value))} 
+                                    onBlur={() => setQty(Math.max(1, parseInt(qty) || 1))} 
+                                    className="w-20 text-center text-4xl font-bold bg-transparent text-white border-b-2 border-slate-600 focus:border-amber-500 outline-none p-1" 
+                                />
+                                <button onClick={() => setQty(safeQty + 1)} className="w-14 h-14 rounded-xl bg-slate-800 text-white font-bold text-3xl hover:bg-slate-700 active:scale-95 flex items-center justify-center border border-slate-700 shadow-md">+</button>
+                            </div>
+                            
+                            {isBox && safeQty > 0 && (
+                                <p className="text-xs text-amber-500 font-bold mt-5 bg-amber-500/10 inline-block px-3 py-1.5 rounded-lg border border-amber-500/20">
+                                    Es werden {totalToConsume} Flaschen ausgetragen
+                                </p>
+                            )}
+                        </div>
+
+                        <div className="grid gap-3">
+                            <button onClick={() => onConsume(totalToConsume)} className="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-amber-900/20 active:scale-95 transition-all text-lg">
+                                <Icon name="minus-circle" />
+                                {totalToConsume} Austragen
+                            </button>
+                            
+                            {item.info && (
+                                <button onClick={() => onInfo()} className="bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 border border-slate-600 active:scale-95 transition-all">
+                                    <Icon name="info" />
+                                    Info anzeigen
+                                </button>
+                            )}
+                            
+                            <button onClick={onClose} className="text-slate-500 hover:text-white font-bold py-3 text-sm mt-1 transition-colors">
+                                Nur Info / Abbrechen
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ManualOrderModal = ({ isOpen, onClose, onSave, inventory }) => {
+            const [d, setD] = useState({ itemId: '', itemName: '', quantity: 1, reason: '' });
+            const [search, setSearch] = useState('');
+            const [showSuggestions, setShowSuggestions] = useState(false);
+            const wrapperRef = useRef(null);
+
+            const suggestions = useMemo(() => {
+                if (!search) return [];
+                return inventory.filter(i => i.name.toLowerCase().includes(search.toLowerCase()));
+            }, [search, inventory]);
+
+            useEffect(() => {
+                if (isOpen) {
+                    setD({ itemId: '', itemName: '', quantity: 1, reason: '' });
+                    setSearch('');
+                    setShowSuggestions(false);
+                }
+            }, [isOpen]);
+
+            useEffect(() => {
+                function handleClickOutside(event) {
+                    if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+                        setShowSuggestions(false);
+                    }
+                }
+                document.addEventListener("mousedown", handleClickOutside);
+                return () => document.removeEventListener("mousedown", handleClickOutside);
+            }, [wrapperRef]);
+
+            const handleSubmit = () => {
+                if(d.itemId && d.reason) {
+                    const qty = (d.quantity === '' || d.quantity <= 0) ? 1 : d.quantity;
+                    onSave({ ...d, quantity: qty });
+                } else {
+                    alert("Bitte Artikel und Grund angeben.");
+                }
+            };
+
+            const selectItem = (item) => {
+                setD({ ...d, itemId: item.id, itemName: item.name });
+                setSearch(item.name);
+                setShowSuggestions(false);
+            };
+
+            if(!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in">
+                    <div className="glass-panel bg-slate-900 w-full max-w-sm p-6 rounded-2xl shadow-2xl border border-slate-700 overflow-visible">
+                        <h3 className="font-bold text-xl text-white mb-6">Sonderbestellung erfassen</h3>
+                        <div className="space-y-4">
+                            <div className="relative" ref={wrapperRef}>
+                                <label className="text-xs text-slate-500 uppercase font-bold ml-1">Artikel suchen</label>
+                                <div className="relative">
+                                    <input 
+                                        type="text"
+                                        className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white outline-none focus:border-indigo-500" 
+                                        placeholder="Tippen zum Suchen..."
+                                        value={search}
+                                        onChange={e => {
+                                            setSearch(e.target.value);
+                                            setShowSuggestions(true);
+                                            if (d.itemId) setD(prev => ({ ...prev, itemId: '', itemName: '' }));
+                                        }}
+                                        onFocus={() => setShowSuggestions(true)}
+                                    />
+                                    {d.itemId && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500">
+                                            <Icon name="check-circle" size={16} />
+                                        </div>
+                                    )}
+                                </div>
+                                
+                                {showSuggestions && search && (
+                                    <div className="absolute z-50 w-full bg-slate-800 border border-slate-700 rounded-lg mt-1 max-h-48 overflow-y-auto shadow-xl">
+                                        {suggestions.length > 0 ? (
+                                            suggestions.map(item => (
+                                                <div 
+                                                    key={item.id} 
+                                                    className="p-3 hover:bg-slate-700 cursor-pointer border-b border-slate-700/50 last:border-0"
+                                                    onClick={() => selectItem(item)}
+                                                >
+                                                    <div className="font-bold text-slate-200">{item.name}</div>
+                                                    <div className="text-xs text-slate-500">{item.category}</div>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="p-3 text-slate-500 text-sm">Keine Artikel gefunden.</div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex gap-3">
+                                <div className="w-1/3">
+                                    <label className="text-xs text-slate-500 uppercase font-bold ml-1">Menge</label>
+                                    <input type="number" className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white focus:border-indigo-500 outline-none" value={d.quantity} onChange={e=>setD({...d, quantity: e.target.value === '' ? '' : parseInt(e.target.value)})} />
+                                </div>
+                                <div className="w-2/3">
+                                    <label className="text-xs text-slate-500 uppercase font-bold ml-1">Grund / Event</label>
+                                    <input type="text" className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white focus:border-indigo-500 outline-none" placeholder="z.B. Bankett 13.06." value={d.reason} onChange={e=>setD({...d, reason: e.target.value})} />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex gap-3 mt-8">
+                            <button onClick={onClose} className="flex-1 py-3 text-slate-400 font-bold hover:text-white transition-colors">Abbruch</button>
+                            <button onClick={handleSubmit} className={`flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg shadow-lg ${!d.itemId ? 'opacity-50 cursor-not-allowed' : ''}`} disabled={!d.itemId}>Hinzufügen</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ShoppingContent = ({stats, extraOrders, selectedOrderItems, orderQuantities, toggleOrderItem, updateOrderQuantity, selectAllOrders, processOrder, deleteManualOrder, openManualOrderModal}) => {
+            const groupedBySupplier = useMemo(() => {
+                const groups = {};
+                stats.lowStockItems.forEach(i => {
+                    const sup = i.supplier || 'Ohne Lieferant';
+                    if (!groups[sup]) groups[sup] = [];
+                    groups[sup].push(i);
+                });
+                return Object.entries(groups).sort(([a], [b]) => a === 'Ohne Lieferant' ? 1 : b === 'Ohne Lieferant' ? -1 : a.localeCompare(b));
+            }, [stats.lowStockItems]);
+
+            return (
+            <div className="glass-panel p-8 rounded-xl max-w-2xl mx-auto shadow-2xl space-y-8">
+
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-slate-700 pb-4 gap-4 md:gap-0">
+                    <div><h2 className="text-2xl font-bold text-white">Einkaufsliste</h2><p className="text-slate-500 text-sm mt-1">{Object.keys(selectedOrderItems).filter(k => selectedOrderItems[k]).length} ausgewählt</p></div>
+                    <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                        <button onClick={openManualOrderModal} className="flex-1 md:flex-none bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-2"><Icon name="plus" size={16} /> <span className="whitespace-nowrap">Sonderbestellung</span></button>
+                        <button onClick={() => selectAllOrders(stats.lowStockItems, extraOrders)} className="bg-slate-800 hover:bg-slate-700 p-3 rounded-lg text-slate-300 text-xs font-bold uppercase">ALLE</button>
+                        <button onClick={() => window.print()} className="bg-slate-800 hover:bg-slate-700 p-3 rounded-lg"><Icon name="printer" /></button>
+                    </div>
+                </div>
+
+                {groupedBySupplier.length > 0 && groupedBySupplier.map(([supplier, items]) => (
+                    <div key={supplier}>
+                        <h3 className="text-xs font-bold text-red-400 uppercase mb-3 flex items-center gap-2">
+                            <Icon name="truck" size={14}/>
+                            {supplier}
+                            <span className="text-slate-500 font-normal ml-1">({items.length})</span>
+                        </h3>
+                        <div className="space-y-1">
+                            {items.map(i => {
+                                const isSelected = !!selectedOrderItems[i.id];
+                                const currentStock = parseFloat(i.stock) || 0;
+                                const minStock = parseFloat(i.min) || 0;
+                                const missing = Math.ceil((minStock - currentStock) + 2);
+
+                                const inputValue = orderQuantities[i.id] !== undefined ? orderQuantities[i.id] : missing;
+                                return (
+                                    <div key={i.id} className={`flex justify-between items-center p-4 rounded-lg transition-all border-b border-slate-800/50 ${isSelected ? 'bg-red-900/20 border-red-500/30' : 'hover:bg-slate-800/40'}`}>
+                                        <div className="flex items-center gap-4 flex-1" onClick={() => toggleOrderItem(i.id)}>
+                                            <input type="checkbox" checked={isSelected} readOnly className="custom-checkbox" />
+                                            <div><div className={`font-bold ${isSelected ? 'text-red-200' : 'text-slate-200'}`}>{i.name}</div><div className="text-xs text-slate-500 font-normal">Ist: {currentStock} | Min: {minStock}</div></div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs text-slate-500 mr-1 uppercase font-bold">Menge:</span>
+                                            <input type="number" className="w-16 p-2 rounded-lg text-center font-bold font-mono outline-none border bg-slate-800 border-slate-600 text-slate-300 focus:ring-amber-500" value={inputValue} onChange={(e) => updateOrderQuantity(i.id, e.target.value)} onClick={(e) => e.stopPropagation()} />
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                ))}
+                {extraOrders.length > 0 && (
+                    <div>
+                        <h3 className="text-xs font-bold text-indigo-400 uppercase mb-3 flex items-center gap-2 mt-6"><Icon name="star" size={14}/> Sonderbestellungen / Events</h3>
+                        <div className="space-y-1">
+                            {extraOrders.map(o => {
+                                const isSelected = !!selectedOrderItems['manual_' + o.id];
+                                return (
+                                    <div key={o.id} className={`flex justify-between items-center p-4 rounded-lg transition-all border-b border-slate-800/50 ${isSelected ? 'bg-indigo-900/30 border-indigo-500/50' : 'hover:bg-slate-800/40'}`}>
+                                        <div className="flex items-center gap-4 flex-1" onClick={() => toggleOrderItem('manual_' + o.id)}>
+                                            <input type="checkbox" checked={isSelected} readOnly className="custom-checkbox" />
+                                            <div><div className={`font-bold ${isSelected ? 'text-indigo-200' : 'text-slate-200'}`}>{o.itemName}</div><div className="text-xs text-indigo-400 font-bold mt-0.5">{o.reason}</div></div>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <span className="bg-indigo-600 text-white px-3 py-1 rounded font-mono font-bold">+{o.quantity}</span>
+                                            <button onClick={(e) => { e.stopPropagation(); deleteManualOrder(o.id); }} className="text-slate-600 hover:text-red-500 p-2"><Icon name="trash-2" size={16} /></button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+                {(stats.lowStockItems.length + extraOrders.length) === 0 && <p className="text-center text-slate-500 py-10">Alles erledigt. Keine offenen Bestellungen.</p>}
+                {(stats.lowStockItems.length + extraOrders.length) > 0 && <button onClick={() => processOrder(stats.lowStockItems, extraOrders)} className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed" disabled={Object.keys(selectedOrderItems).filter(k => selectedOrderItems[k]).length === 0}><Icon name="check-circle" size={20} /> Wareneingang buchen</button>}
+            </div>
+            );
+        };
+
+        const LogsContent = ({logs, onFetchPeriod}) => {
+            const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+            const [isLoading, setIsLoading] = useState(false);
+
+            const handleFetch = async () => {
+                setIsLoading(true);
+                await onFetchPeriod(selectedMonth);
+                setIsLoading(false);
+            };
+
+            const parseLogEntry = (log) => {
+                let name = "Unbekannt";
+                let delta = 0;
+                if (log.type === 'UPDATE') {
+                    const match = log.message.match(/(.+):\sBestand\s([+-]?\d+(\.\d+)?)/);
+                    if (match) { name = match[1]; delta = parseFloat(match[2]); }
+                } else if (log.type === 'ORDER') {
+                    const match = log.message.match(/Bestellt:\s(.+)\s\(([+-]?\d+)\)/);
+                    if (match) { name = match[1]; delta = parseFloat(match[2]); }
+                }
+                return { name, delta };
+            };
+
+            const exportBalance = () => {
+                const balance = {};
+                logs.forEach(log => {
+                    if (log.type === 'UPDATE' || log.type === 'ORDER') {
+                        const { name, delta } = parseLogEntry(log);
+                        if (name === "Unbekannt") return;
+                        if (!balance[name]) balance[name] = { in: 0, out: 0 };
+                        if (delta > 0) balance[name].in += delta;
+                        else balance[name].out += Math.abs(delta);
+                    }
+                });
+
+                const headers = ["Artikel", "Total Rein (+)", "Total Raus (-)", "Netto Bilanz"];
+                const rows = Object.entries(balance).sort((a,b) => a[0].localeCompare(b[0])).map(([name, data]) => {
+                    return [ `"${name}"`, data.in.toString().replace('.', ','), data.out.toString().replace('.', ','), (data.in - data.out).toString().replace('.', ',') ];
+                });
+
+                const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = `Bilanz_${selectedMonth}.csv`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            return (
+                <div className="space-y-6 max-w-4xl mx-auto animate-in fade-in">
+                    <div className="glass-panel p-4 rounded-xl flex flex-wrap gap-4 items-end sticky top-24 z-40 shadow-xl no-print">
+                        <div className="flex-1 min-w-[200px]">
+                            <label className="text-[10px] text-slate-500 uppercase font-bold ml-1 mb-1 block">Monat laden</label>
+                            <div className="flex gap-2">
+                                <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} className="bg-slate-950 border border-slate-700 p-2 rounded-lg text-white flex-1 outline-none focus:border-amber-500" />
+                                <button onClick={handleFetch} className="bg-slate-800 hover:bg-slate-700 p-2 px-4 rounded-lg text-white border border-slate-700 flex items-center gap-2">
+                                    {isLoading ? <span className="animate-spin text-amber-500">⟳</span> : <Icon name="refresh-cw" size={16} />}
+                                    Laden
+                                </button>
+                            </div>
+                        </div>
+                        <button onClick={exportBalance} disabled={logs.length === 0} className="bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/40 p-2 px-4 rounded-lg border border-emerald-600/30 flex items-center gap-2 text-xs font-bold disabled:opacity-50">
+                            <Icon name="trending-up" size={14} /> Bilanz (CSV)
+                        </button>
+                    </div>
+
+                    <div className="glass-panel p-6 rounded-xl">
+                        <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2"><Icon name="history" /> Historie: {selectedMonth}</h2>
+                        <div className="space-y-2">
+                            {logs.map(log => {
+                                const date = log.timestamp ? new Date(log.timestamp.seconds * 1000) : new Date();
+                                let colorClass = "border-slate-800";
+                                if (log.type === 'DELETE') colorClass = "border-red-900/30 bg-red-900/10";
+                                if (log.type === 'ORDER') colorClass = "border-emerald-900/30 bg-emerald-900/10";
+                                return (
+                                    <div key={log.id} className={`flex items-start gap-4 p-3 rounded-lg border ${colorClass} bg-slate-900/20`}>
+                                        <div className="text-[10px] font-mono text-slate-500 w-24 pt-1 flex-shrink-0">
+                                            <div className="font-bold">{date.toLocaleDateString()}</div>
+                                            <div>{date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                                        </div>
+                                        <div className="flex-1">
+                                            <div className="font-bold text-slate-300 text-sm">{log.message}</div>
+                                            {log.details && <div className="text-xs text-slate-500 italic mt-0.5">{log.details}</div>}
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                            {logs.length === 0 && <p className="text-center text-slate-500 py-12">Keine Protokolle gefunden.</p>}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const SettingsContent = ({categories, suppliers, addCategory, deleteCategory, addSupplier, deleteSupplier, resetCategories, exportCSV}) => {
+            const fileInputRef = useRef(null);
+
+            const handleImport = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const text = e.target.result;
+                    const lines = text.split(/\r\n|\n/);
+                    if (lines.length < 2) return alert("Datei ist leer oder hat kein Format.");
+
+                    const headers = lines[0].split(';').map(h => h.trim().replace(/^"|"$/g, ''));
+                    const map = {
+                        'Name': 'name',
+                        'Kategorie': 'category',
+                        'Lieferant': 'supplier',
+                        'Bestand': 'stock',
+                        'Min. Bestand': 'min',
+                        'Inhalt (cl)': 'size',
+                        'Preis (CHF)': 'price',
+                        'Barcode': 'barcode',
+                        'Karton Barcode': 'boxBarcode',
+                        'Fl. pro Karton': 'boxQuantity',
+                        'Info': 'info'
+                    };
+
+                    const batch = window.fb.writeBatch(window.fb.db);
+                    const collectionRef = window.fb.collection(window.fb.db, 'bar_inventory');
+                    let count = 0;
+
+                    const splitRegex = /(?:^|;)(?:"([^"]*(?:""[^"]*)*)"|([^";]*))/g;
+
+                    for (let i = 1; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        if (!line) continue;
+                        
+                        const matches = [...line.matchAll(splitRegex)];
+                        const values = matches.map(m => m[1] ? m[1].replace(/""/g, '"') : m[2]);
+
+                        if (values.length === 0) continue;
+
+                        const item = {};
+                        let hasName = false;
+
+                        headers.forEach((header, index) => {
+                            const key = map[header];
+                            if (key && index < values.length) {
+                                let val = values[index] ? values[index].trim() : '';
+                                
+                                if (key === 'stock' || key === 'min') val = parseFloat(val) || 0;
+                                if (key === 'price' || key === 'size') val = val === '' ? '' : (parseFloat(val) || '');
+                                if (key === 'boxQuantity') val = val === '' ? '' : parseInt(val);
+                                if (key === 'name' && val) hasName = true;
+                                
+                                item[key] = val;
+                            }
+                        });
+
+                        if (hasName) {
+                            if (!item.category) item.category = 'Sonstiges';
+                            const newDoc = window.fb.doc(collectionRef);
+                            batch.set(newDoc, { ...item, lastUpdated: window.fb.serverTimestamp() });
+                            count++;
+                        }
+                    }
+
+                    if (count > 0) {
+                        if (confirm(`${count} Artikel gefunden. Importieren?`)) {
+                            try {
+                                await batch.commit();
+                                alert('Import erfolgreich! ' + count + ' Artikel hinzugefügt.');
+                            } catch (e) {
+                                console.error(e);
+                                alert('Fehler beim Importieren in die Datenbank.');
+                            }
+                        }
+                    } else {
+                        alert('Keine gültigen Artikeldaten gefunden.');
+                    }
+                    if(fileInputRef.current) fileInputRef.current.value = ''; 
+                };
+                reader.readAsText(file);
+            };
+
+            return (
+                <div className="glass-panel p-8 rounded-xl max-w-2xl mx-auto shadow-2xl animate-in fade-in">
+                    <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2"><Icon name="settings" /> Einstellungen</h2>
+                    
+                    <div className="mb-8 p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+                        <h3 className="text-sm font-bold text-slate-400 uppercase mb-3">Daten Import / Export</h3>
+                        <div className="flex flex-col gap-3">
+                            <button onClick={exportCSV} className="w-full bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all">
+                                <Icon name="download" size={18} /> Bestandsliste exportieren (CSV)
+                            </button>
+                            <div className="relative">
+                                <input 
+                                    type="file" 
+                                    accept=".csv" 
+                                    ref={fileInputRef}
+                                    onChange={handleImport} 
+                                    className="hidden" 
+                                    id="csvImport"
+                                />
+                                <label htmlFor="csvImport" className="w-full bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all cursor-pointer border border-dashed border-slate-600">
+                                    <Icon name="upload" size={18} /> Daten importieren (CSV)
+                                </label>
+                            </div>
+                            <p className="text-[10px] text-slate-500 text-center mt-1">Format: CSV mit Semikolon (;) getrennt. Kopfzeile erforderlich.</p>
+                        </div>
+                    </div>
+                    
+                    <h3 className="text-sm font-bold text-slate-400 uppercase mb-3">Kategorien</h3>
+                    <div className="flex flex-col md:flex-row gap-2 mb-6">
+                        <input id="newCatInput" className="flex-1 bg-slate-950 border border-slate-800 p-3 rounded-lg text-white outline-none focus:border-amber-500" placeholder="Neue Kategorie..." />
+                        <button onClick={() => { const val = document.getElementById('newCatInput').value; if(val) { addCategory(val); document.getElementById('newCatInput').value = ''; }}} className="bg-amber-500 text-slate-900 font-bold px-4 py-3 md:py-0 rounded-lg flex items-center justify-center gap-2 hover:bg-amber-400"><Icon name="plus" /> Hinzufügen</button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8 max-h-[200px] overflow-y-auto">{categories.map(cat => (<div key={cat.id || cat.label} className="flex justify-between items-center bg-slate-900/50 p-3 rounded-lg border border-slate-800 group"><span className="text-slate-200">{cat.label}</span><button onClick={() => deleteCategory(cat.id)} className="text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="trash-2" size={16} /></button></div>))}</div>
+
+                    <h3 className="text-sm font-bold text-slate-400 uppercase mb-3">Lieferanten</h3>
+                    <div className="flex flex-col md:flex-row gap-2 mb-6">
+                        <input id="newSuppInput" className="flex-1 bg-slate-950 border border-slate-800 p-3 rounded-lg text-white outline-none focus:border-amber-500" placeholder="Neuer Lieferant..." />
+                        <button onClick={() => { const val = document.getElementById('newSuppInput').value; if(val) { addSupplier(val); document.getElementById('newSuppInput').value = ''; }}} className="bg-amber-500 text-slate-900 font-bold px-4 py-3 md:py-0 rounded-lg flex items-center justify-center gap-2 hover:bg-amber-400"><Icon name="plus" /> Hinzufügen</button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8 max-h-[200px] overflow-y-auto">{suppliers.map(sup => (<div key={sup.id || sup.label} className="flex justify-between items-center bg-slate-900/50 p-3 rounded-lg border border-slate-800 group"><span className="text-slate-200">{sup.label}</span><button onClick={() => deleteSupplier(sup.id)} className="text-slate-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="trash-2" size={16} /></button></div>))}</div>
+
+                    <div className="border-t border-slate-700 pt-6"><button onClick={resetCategories} className="w-full py-3 border border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 rounded-lg text-sm flex items-center justify-center gap-2"><Icon name="refresh-ccw" size={16} /> Standards wiederherstellen</button></div>
+                </div>
+            );
+        };
+
+        const ItemModal = ({ isOpen, onClose, onSave, categories, suppliers, initialData, scannedCode, onScanRequest }) => {
+            const defaultCat = (categories && categories.length > 0) ? categories[0].label : 'Sonstiges';
+            const defaultSup = (suppliers && suppliers.length > 0) ? suppliers[0].label : '';
+            const [d, setD] = useState(initialData || { name: '', category: defaultCat, supplier: defaultSup, stock: 1, min: 2, price: '', size: '', barcode: '', boxBarcode: '', boxQuantity: '', info: '' });
+            
+            useEffect(() => { 
+                if (isOpen) { 
+                    const base = initialData ? { ...initialData } : { name: '', category: defaultCat, supplier: defaultSup, stock: 1, min: 2, price: '', size: '', barcode: '', boxBarcode: '', boxQuantity: '', info: '' }; 
+                    if (!base.supplier && suppliers.length > 0) base.supplier = suppliers[0].label; 
+                    setD(base); 
+                } 
+            }, [isOpen, initialData, suppliers]); 
+
+            useEffect(() => { 
+                if (scannedCode && scannedCode.field) { 
+                    setD(prev => ({ ...prev, [scannedCode.field]: scannedCode.value })); 
+                } 
+            }, [scannedCode]);
+            
+            useEffect(() => { 
+                if (!initialData && categories.length > 0 && !categories.some(c => c.label === d.category)) { 
+                    setD(prev => ({ ...prev, category: categories[0].label })); 
+                } 
+            }, [categories]);
+
+            const save = () => { if(d.name) onSave(d); };
+            if(!isOpen) return null;
+            return (
+                <div className="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in">
+                    <div className="glass-panel bg-slate-900 w-full max-w-sm p-6 rounded-2xl shadow-2xl border border-slate-700 max-h-[90vh] overflow-y-auto">
+                        <h3 className="font-bold text-xl text-white mb-6">{initialData ? 'Artikel bearbeiten' : 'Neues Produkt'}</h3>
+                        <div className="space-y-4">
+                            <div><label className="text-xs text-slate-500 uppercase font-bold ml-1">Name</label><input className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white focus:border-amber-500 outline-none" placeholder="z.B. Grey Goose" value={d.name} onChange={e=>setD({...d, name: e.target.value})} autoFocus /></div>
+                            
+                            <div className="flex gap-3">
+                                <div className="w-1/2">
+                                    <label className="text-xs text-slate-500 uppercase font-bold ml-1">Kategorie</label>
+                                    <select className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white outline-none focus:border-amber-500" value={d.category} onChange={e=>setD({...d, category: e.target.value})}>{categories.map(c=><option key={c.id || c.label} value={c.label}>{c.label}</option>)}</select>
+                                </div>
+                                <div className="w-1/2">
+                                    <label className="text-xs text-slate-500 uppercase font-bold ml-1">Lieferant</label>
+                                    <select className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white outline-none focus:border-amber-500" value={d.supplier || ''} onChange={e=>setD({...d, supplier: e.target.value})}>
+                                        <option value="">Keiner</option>
+                                        {suppliers.map(s=><option key={s.id || s.label} value={s.label}>{s.label}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label className="text-xs text-slate-500 uppercase font-bold ml-1">Beschreibung / Info</label>
+                                <textarea className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white focus:border-amber-500 outline-none h-20 resize-none" placeholder="Zusatzinfos, Rezeptur, Lagerort..." value={d.info || ''} onChange={e=>setD({...d, info: e.target.value})} />
+                            </div>
+
+                            <div className="flex gap-3">
+                                <div className="w-1/2"><label className="text-xs text-slate-500 uppercase font-bold ml-1">Preis (CHF)</label><input type="number" step="0.01" className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white focus:border-amber-500 outline-none" placeholder="0.00" value={d.price} onChange={e=>setD({...d, price: e.target.value === '' ? '' : e.target.value})} /></div>
+                                <div className="w-1/2"><label className="text-xs text-slate-500 uppercase font-bold ml-1">Inhalt (cl)</label><input type="number" className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white focus:border-amber-500 outline-none" placeholder="70" value={d.size} onChange={e=>setD({...d, size: e.target.value === '' ? '' : e.target.value})} /></div>
+                            </div>
+                            
+                            <div className="flex gap-3">
+                                <div className="w-1/2"><label className="text-xs text-slate-500 uppercase font-bold ml-1">Bestand</label><input type="number" step="0.5" className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white focus:border-amber-500 outline-none" placeholder="0" value={d.stock} onChange={e=>setD({...d, stock: e.target.value === '' ? '' : parseFloat(e.target.value)})} /></div>
+                                <div className="w-1/2"><label className="text-xs text-slate-500 uppercase font-bold ml-1">Warn-Limit</label><input type="number" className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white focus:border-amber-500 outline-none" placeholder="2" value={d.min} onChange={e=>setD({...d, min: e.target.value === '' ? '' : parseInt(e.target.value)})} /></div>
+                            </div>
+                            
+                            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 mt-2 space-y-4">
+                                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2"><Icon name="barcode" size={14}/> Barcodes & VPE</h4>
+                                
+                                <div>
+                                    <label className="text-[10px] text-slate-500 uppercase font-bold ml-1 block mb-1">Einzel-Barcode (Flasche)</label>
+                                    <div className="flex gap-2">
+                                        <input className="flex-1 min-w-0 bg-slate-950 border border-slate-800 p-3 rounded-lg text-white focus:border-amber-500 outline-none font-mono text-sm" placeholder="Scannen oder tippen..." value={d.barcode || ''} onChange={e=>setD({...d, barcode: e.target.value})} />
+                                        <button onClick={() => onScanRequest('barcode')} className="shrink-0 flex items-center justify-center bg-slate-800 border border-slate-700 hover:bg-slate-700 text-white px-4 rounded-lg transition-colors"><Icon name="scan-barcode" /></button>
+                                    </div>
+                                </div>
+                                
+                                <div className="pt-2 border-t border-slate-800/50">
+                                    <label className="text-[10px] text-slate-500 uppercase font-bold ml-1 block mb-1">Karton-Barcode (VPE)</label>
+                                    <div className="flex gap-2 mb-4">
+                                        <input className="flex-1 min-w-0 bg-slate-950 border border-slate-800 p-3 rounded-lg text-white focus:border-amber-500 outline-none font-mono text-sm" placeholder="Karton scannen..." value={d.boxBarcode || ''} onChange={e=>setD({...d, boxBarcode: e.target.value})} />
+                                        <button onClick={() => onScanRequest('boxBarcode')} className="shrink-0 flex items-center justify-center bg-slate-800 border border-slate-700 hover:bg-slate-700 text-white px-4 rounded-lg transition-colors"><Icon name="scan-barcode" /></button>
+                                    </div>
+
+                                    <label className="text-[10px] text-slate-500 uppercase font-bold ml-1 block mb-1">Fl. pro Karton (VPE Menge)</label>
+                                    <input type="number" className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white focus:border-amber-500 outline-none font-bold" placeholder="z.B. 6" value={d.boxQuantity || ''} onChange={e=>setD({...d, boxQuantity: e.target.value === '' ? '' : parseInt(e.target.value)})} />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3 mt-8">
+                            <button onClick={onClose} className="flex-1 py-3 text-slate-400 font-bold hover:text-white transition-colors">Abbruch</button>
+                            <button onClick={save} className="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold rounded-lg shadow-lg shadow-amber-900/20 transition-all">Speichern</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ScannerModal = ({ onClose, onScan }) => {
+            useEffect(() => { const scanner = new Html5Qrcode("reader"); const config = { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 }; scanner.start({ facingMode: "environment" }, config, (decodedText) => { scanner.stop().then(() => onScan(decodedText)); }).catch(err => { console.error("Camera Error", err); alert("Kamera konnte nicht gestartet werden. Bitte Berechtigung prüfen."); onClose(); }); return () => { try { if(scanner.isScanning) scanner.stop(); } catch(e){} }; }, []);
+            return (<div className="fixed inset-0 bg-black z-[200] flex flex-col"><div className="flex justify-between items-center p-4 bg-slate-900"><h2 className="text-white font-bold">Scanner aktiv</h2><button onClick={onClose} className="text-white bg-slate-800 px-4 py-2 rounded">Schließen</button></div><div id="reader" className="flex-1 bg-black w-full h-full"></div><div className="p-4 bg-slate-900 text-center text-slate-400 text-sm">Barcode im Rahmen positionieren</div></div>);
+        };
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [activeTab, setActiveTab] = useState('inventory');
+            const [inventory, setInventory] = useState([]);
+            const [categories, setCategories] = useState([]); 
+            const [suppliers, setSuppliers] = useState([]); 
+            const [logs, setLogs] = useState([]); 
+            const [extraOrders, setExtraOrders] = useState([]);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [status, setStatus] = useState('connecting'); 
+            const [showConnectionHelp, setShowConnectionHelp] = useState(false);
+            const [pendingWrites, setPendingWrites] = useState(false); 
+            const [viewingInfoItem, setViewingInfoItem] = useState(null); 
+            
+            const [scanResultData, setScanResultData] = useState(null); 
+            
+            const [filterOpen, setFilterOpen] = useState(false); 
+            const [filters, setFilters] = useState({ sort: 'name_asc', supplier: '', barcode: 'all', info: 'all' });
+            const [visibleItems, setVisibleItems] = useState(24);
+            
+            const [vatRate, setVatRate] = useState(8.1);
+
+            const [modalOpen, setModalOpen] = useState(false);
+            const [editingItem, setEditingItem] = useState(null); 
+            const [manualOrderModalOpen, setManualOrderModalOpen] = useState(false); 
+            
+            const [scannerOpen, setScannerOpen] = useState(false);
+            const [scanContext, setScanContext] = useState(null);
+            const [activeScanResult, setActiveScanResult] = useState(null); 
+
+            const [selectedOrderItems, setSelectedOrderItems] = useState({});
+            const [orderQuantities, setOrderQuantities] = useState({});
+
+            const [consumptionPeriod, setConsumptionPeriod] = useState(3);
+            const [consumptionLogs, setConsumptionLogs] = useState([]);
+            const [consumptionLoading, setConsumptionLoading] = useState(false);
+
+            useEffect(() => {
+                let timer;
+                if (status === 'connecting') {
+                    timer = setTimeout(() => setShowConnectionHelp(true), 5000);
+                } else {
+                    setShowConnectionHelp(false);
+                }
+                return () => clearTimeout(timer);
+            }, [status]);
+
+            useEffect(() => {
+                const handleScroll = () => {
+                    if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) {
+                        setVisibleItems(prev => prev + 12);
+                    }
+                };
+                window.addEventListener('scroll', handleScroll);
+                return () => window.removeEventListener('scroll', handleScroll);
+            }, []);
+
+            useEffect(() => {
+                setVisibleItems(24);
+            }, [searchTerm, filters]);
+
+            useEffect(() => {
+                if(!window.fb) return;
+                const { auth, signInAnonymously, onAuthStateChanged } = window.fb;
+                
+                const unsubscribe = onAuthStateChanged(auth, (u) => {
+                    if (u) {
+                        setUser(u);
+                    } else {
+                        signInAnonymously(auth).catch(e => {
+                            setStatus('offline_auth_error');
+                        });
+                    }
+                });
+                return unsubscribe;
+            }, []);
+
+            useEffect(() => {
+                if(!window.fb) return;
+                if (!user) return; 
+
+                const { db, collection, onSnapshot, query, orderBy, limit } = window.fb;
+
+                const unsubInv = onSnapshot(query(collection(db, 'bar_inventory')), (snapshot) => {
+                    const items = [];
+                    snapshot.forEach((doc) => items.push({ id: doc.id, ...doc.data() }));
+                    items.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                    setInventory(items);
+                    
+                    const fromCache = snapshot.metadata.fromCache;
+                    const hasPending = snapshot.metadata.hasPendingWrites;
+                    setPendingWrites(hasPending);
+
+                    if (fromCache) {
+                        setStatus(hasPending ? 'offline_pending' : 'offline_data');
+                    } else {
+                        setStatus('synced');
+                    }
+                });
+
+                const unsubCat = onSnapshot(query(collection(db, 'bar_categories')), (snapshot) => {
+                    const cats = [];
+                    snapshot.forEach((doc) => cats.push({ id: doc.id, ...doc.data() }));
+                    if (cats.length > 0) {
+                        cats.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+                        setCategories(cats);
+                    } else {
+                        setCategories(DEFAULT_CATS.map(c => ({ id: 'default_'+c, label: c })));
+                    }
+                });
+
+                const unsubSupp = onSnapshot(query(collection(db, 'bar_suppliers')), (snapshot) => {
+                    const sups = [];
+                    snapshot.forEach((doc) => sups.push({ id: doc.id, ...doc.data() }));
+                    sups.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+                    setSuppliers(sups);
+                });
+
+                const unsubLogs = onSnapshot(query(collection(db, 'bar_logs'), orderBy('timestamp', 'desc'), limit(50)), (snapshot) => {
+                    const loadedLogs = [];
+                    snapshot.forEach((doc) => loadedLogs.push({ id: doc.id, ...doc.data() }));
+                    setLogs(loadedLogs);
+                });
+
+                const unsubExtra = onSnapshot(query(collection(db, 'bar_extra_orders'), orderBy('timestamp', 'desc')), (snapshot) => {
+                    const orders = [];
+                    snapshot.forEach((doc) => orders.push({ id: doc.id, ...doc.data() }));
+                    setExtraOrders(orders);
+                });
+
+                return () => { unsubInv(); unsubCat(); unsubSupp(); unsubLogs(); unsubExtra(); };
+            }, [user]);
+
+            const addToLog = async (type, message, details = "") => {
+                if (!window.fb) return;
+                const { db, collection, addDoc, serverTimestamp } = window.fb;
+                try {
+                    await addDoc(collection(db, 'bar_logs'), {
+                        type, message, details, timestamp: serverTimestamp(), user: 'User'
+                    });
+                } catch(e) {}
+            };
+
+            const updateStock = async (id, current, delta, itemName) => {
+                if(!window.fb) return;
+                const { db, doc, setDoc, serverTimestamp, increment } = window.fb;
+                
+                const currentFloat = parseFloat(current) || 0;
+                const estimatedNewStock = Math.max(0, Math.round((currentFloat + delta) * 10) / 10);
+
+                setInventory(prev => prev.map(item => 
+                    item.id === id ? { ...item, stock: estimatedNewStock } : item
+                ));
+
+                try {
+                    await setDoc(doc(db, 'bar_inventory', id), { 
+                        stock: increment(delta), 
+                        lastUpdated: serverTimestamp() 
+                    }, { merge: true });
+                    
+                    addToLog('UPDATE', `${itemName}: Bestand ${delta > 0 ? '+' : ''}${delta}`, `Neu (geschätzt): ${estimatedNewStock}`);
+                } catch (e) { }
+            };
+
+            const saveItem = async (itemData) => {
+                if(!window.fb) return;
+                const { db, doc, setDoc, serverTimestamp } = window.fb;
+                try {
+                    const actionType = (editingItem && editingItem.id) ? 'EDIT' : 'CREATE';
+                    if (editingItem && editingItem.id) {
+                        await setDoc(doc(db, 'bar_inventory', editingItem.id), { ...itemData, lastUpdated: serverTimestamp() }, { merge: true });
+                        addToLog(actionType, `Artikel bearbeitet: ${itemData.name}`);
+                    } else {
+                        const newId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+                        await setDoc(doc(db, 'bar_inventory', newId), { ...itemData, lastUpdated: serverTimestamp() });
+                        addToLog(actionType, `Neuer Artikel: ${itemData.name}`);
+                    }
+                    setModalOpen(false);
+                    setEditingItem(null);
+                    setActiveScanResult(null);
+                } catch (e) { alert("Speichern fehlgeschlagen."); }
+            };
+
+            const deleteItem = async (id, name) => {
+                if(!window.fb) return;
+                const { db, doc, deleteDoc } = window.fb;
+                if(confirm('Löschen?')) {
+                    await deleteDoc(doc(db, 'bar_inventory', id));
+                    addToLog('DELETE', `Artikel gelöscht: ${name}`);
+                }
+            };
+
+            const addCategory = async (label) => {
+                if(!window.fb || !label) return;
+                const { db, doc, setDoc } = window.fb;
+                const id = label.toLowerCase().trim().replace(/[^a-z0-9]/g, '_') + '_' + Date.now();
+                await setDoc(doc(db, 'bar_categories', id), { label: label });
+                addToLog('CONFIG', `Kategorie erstellt: ${label}`);
+            };
+            const deleteCategory = async (id) => {
+                if(!window.fb) return;
+                const { db, doc, deleteDoc } = window.fb;
+                if(confirm('Kategorie wirklich löschen?')) { try { await deleteDoc(doc(db, 'bar_categories', id)); } catch(e) {} }
+            };
+            const addSupplier = async (label) => {
+                if(!window.fb || !label) return;
+                const { db, doc, setDoc } = window.fb;
+                const id = label.toLowerCase().trim().replace(/[^a-z0-9]/g, '_') + '_' + Date.now();
+                await setDoc(doc(db, 'bar_suppliers', id), { label: label });
+                addToLog('CONFIG', `Lieferant erstellt: ${label}`);
+            };
+            const deleteSupplier = async (id) => {
+                if(!window.fb) return;
+                const { db, doc, deleteDoc } = window.fb;
+                if(confirm('Lieferant wirklich löschen?')) { try { await deleteDoc(doc(db, 'bar_suppliers', id)); } catch(e) {} }
+            };
+            const resetCategories = async () => {
+                if(!window.fb) return;
+                const { db, doc, setDoc, writeBatch } = window.fb;
+                const batch = writeBatch(db);
+                DEFAULT_CATS.forEach(cat => { const id = cat.toLowerCase().replace(/[^a-z0-9]/g, '_'); batch.set(doc(db, 'bar_categories', id), { label: cat }); });
+                await batch.commit();
+                alert("Standard-Kategorien wiederhergestellt.");
+            };
+            
+            const exportCSV = () => {
+                const headers = ["Name", "Kategorie", "Lieferant", "Bestand", "Min. Bestand", "Inhalt (cl)", "Preis (CHF)", "Barcode", "Karton Barcode", "Fl. pro Karton", "Info"];
+                const rows = inventory.map(i => [
+                    `"${i.name.replace(/"/g, '""')}"`, 
+                    `"${i.category}"`, 
+                    `"${i.supplier || ''}"`, 
+                    i.stock, 
+                    i.min, 
+                    i.size || "", 
+                    i.price || "", 
+                    `"${i.barcode || ""}"`, 
+                    `"${i.boxBarcode || ""}"`, 
+                    i.boxQuantity || "", 
+                    `"${(i.info || '').replace(/"/g, '""')}"`
+                ]);
+                const csvContent = [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
+                const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                const url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", `bar_inventur_${new Date().toISOString().slice(0,10)}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const fetchLogsForPeriod = async (p) => {
+                if(!window.fb) return;
+                const [y, m] = p.split('-').map(Number);
+                const s = new Date(y, m - 1, 1);
+                const e = new Date(y, m, 0, 23, 59, 59);
+                try {
+                    const q = window.fb.query(window.fb.collection(window.fb.db, 'bar_logs'), window.fb.where('timestamp', '>=', s), window.fb.where('timestamp', '<=', e), window.fb.orderBy('timestamp', 'desc'));
+                    const sn = await window.fb.getDocs(q);
+                    const pl = []; sn.forEach(d => pl.push({ id: d.id, ...d.data() }));
+                    setLogs(pl);
+                } catch (err) {}
+            };
+
+            const fetchConsumptionLogs = async (months) => {
+                if (!window.fb) return;
+                setConsumptionLoading(true);
+                try {
+                    const now = new Date();
+                    const start = new Date(now.getFullYear(), now.getMonth() - months, now.getDate());
+                    const q = window.fb.query(
+                        window.fb.collection(window.fb.db, 'bar_logs'),
+                        window.fb.where('timestamp', '>=', start),
+                        window.fb.where('timestamp', '<=', now),
+                        window.fb.orderBy('timestamp', 'desc')
+                    );
+                    const snap = await window.fb.getDocs(q);
+                    const results = [];
+                    snap.forEach(d => results.push({ id: d.id, ...d.data() }));
+                    setConsumptionLogs(results);
+                } catch (err) {
+                    console.error("Fehler beim Laden der Verbrauchsdaten:", err);
+                }
+                setConsumptionLoading(false);
+            };
+
+            useEffect(() => {
+                if (user) fetchConsumptionLogs(consumptionPeriod);
+            }, [consumptionPeriod, user]);
+
+            const addManualOrder = async (orderData) => {
+                if(!window.fb) return;
+                const { db, collection, addDoc, serverTimestamp } = window.fb;
+                try {
+                    await addDoc(collection(db, 'bar_extra_orders'), {
+                        ...orderData,
+                        timestamp: serverTimestamp()
+                    });
+                    addToLog('ORDER', `Sonderbestellung: ${orderData.itemName}`, orderData.reason);
+                    setManualOrderModalOpen(false);
+                } catch (e) { alert("Fehler beim Speichern der Sonderbestellung."); }
+            };
+
+            const deleteManualOrder = async (id) => {
+                if(!window.fb) return;
+                const { db, doc, deleteDoc } = window.fb;
+                if(confirm('Bestellung löschen?')) await deleteDoc(doc(db, 'bar_extra_orders', id));
+            };
+
+            const toggleOrderItem = (id) => {
+                setSelectedOrderItems(prev => ({ ...prev, [id]: !prev[id] }));
+            };
+
+            const updateOrderQuantity = (id, val) => {
+                setOrderQuantities(prev => ({ ...prev, [id]: val === '' ? '' : parseInt(val) }));
+            };
+
+            const processOrder = async (lowStockItems, extraOrdersList) => {
+                if(!window.fb) return;
+                const { db, doc, writeBatch, serverTimestamp, increment } = window.fb;
+                const batch = writeBatch(db);
+                let count = 0;
+                const pendingLogs = []; 
+
+                lowStockItems.forEach(item => {
+                    if (selectedOrderItems[item.id]) {
+                        const currentStock = parseFloat(item.stock) || 0;
+                        const minStock = parseFloat(item.min) || 0;
+                        const suggestion = Math.ceil((minStock - currentStock) + 2);
+                        
+                        const qtyValue = orderQuantities[item.id];
+                        const qtyToAdd = (qtyValue !== undefined && qtyValue !== '') ? qtyValue : suggestion;
+                        
+                        batch.update(doc(db, 'bar_inventory', item.id), { 
+                            stock: increment(qtyToAdd), 
+                            lastUpdated: serverTimestamp() 
+                        });
+                        
+                        pendingLogs.push({ type: 'ORDER', msg: `Bestellt: ${item.name} (+${qtyToAdd})`, det: `Automatischer Nachschub` });
+                        count++;
+                    }
+                });
+
+                extraOrdersList.forEach(order => {
+                    if (selectedOrderItems['manual_' + order.id]) {
+                        const invItem = inventory.find(i => i.id === order.itemId);
+                        if (invItem) {
+                            const qtyToAdd = parseInt(order.quantity) || 0;
+                            batch.update(doc(db, 'bar_inventory', invItem.id), { 
+                                stock: increment(qtyToAdd), 
+                                lastUpdated: serverTimestamp() 
+                            });
+                            pendingLogs.push({ type: 'ORDER', msg: `Bestellt: ${order.itemName} (+${qtyToAdd})`, det: `Sonderbestellung: ${order.reason}` });
+                        }
+                        batch.delete(doc(db, 'bar_extra_orders', order.id));
+                        count++;
+                    }
+                });
+
+                if (count === 0) return alert("Bitte wählen Sie zuerst Artikel aus.");
+
+                if(confirm(`${count} Positionen als eingetroffen buchen? Bestand wird aktualisiert.`)) {
+                    try {
+                        await batch.commit(); 
+                        pendingLogs.forEach(l => addToLog(l.type, l.msg, l.det));
+                        setSelectedOrderItems({});
+                        setOrderQuantities({});
+                    } catch(e) {}
+                }
+            };
+
+            const selectAllOrders = (lowStockItems, extraOrdersList) => {
+                const newState = {};
+                lowStockItems.forEach(i => newState[i.id] = true);
+                extraOrdersList.forEach(i => newState['manual_' + i.id] = true);
+                setSelectedOrderItems(newState);
+            };
+
+            const stats = useMemo(() => {
+                let totalBottles = 0, totalValue = 0;
+                const lowStockItems = [];
+                const catStats = {}; 
+                inventory.forEach(i => {
+                    const stock = parseFloat(i.stock) || 0; 
+                    const min = parseFloat(i.min) || 0; 
+                    const price = parseFloat(i.price) || 0;
+                    const cat = i.category || 'Sonstiges';
+                    totalBottles += stock;
+                    totalValue += (stock * price);
+                    if (stock < min) lowStockItems.push(i); 
+                    if (!catStats[cat]) catStats[cat] = { count: 0, value: 0 };
+                    catStats[cat].count += stock;
+                    catStats[cat].value += (stock * price);
+                });
+                return { totalBottles, totalValue, lowStockItems, catStats };
+            }, [inventory]);
+
+            const consumptionStats = useMemo(() => {
+                const perArticle = {};
+                let totalConsumed = 0;
+
+                consumptionLogs.forEach(log => {
+                    if (log.type !== 'UPDATE') return;
+                    const match = log.message.match(/(.+):\sBestand\s([+-]?\d+(\.\d+)?)/);
+                    if (!match) return;
+                    const name = match[1];
+                    const delta = parseFloat(match[2]);
+                    if (delta >= 0) return;
+
+                    const absDelta = Math.abs(delta);
+                    if (!perArticle[name]) perArticle[name] = { total: 0, count: 0 };
+                    perArticle[name].total += absDelta;
+                    perArticle[name].count += 1;
+                    totalConsumed += absDelta;
+                });
+
+                const months = consumptionPeriod || 1;
+                Object.values(perArticle).forEach(v => {
+                    v.avgPerMonth = v.total / months;
+                });
+
+                const ranked = Object.entries(perArticle)
+                    .map(([name, data]) => ({ name, ...data }))
+                    .sort((a, b) => b.total - a.total);
+
+                return { perArticle, totalConsumed, avgPerMonth: totalConsumed / months, ranked };
+            }, [consumptionLogs, consumptionPeriod]);
+
+            const filtered = useMemo(() => {
+                return inventory.filter(i => {
+                    const searchMatch = (i.name||'').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                                        (i.category||'').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                                        (i.barcode||'').includes(searchTerm) ||
+                                        (i.boxBarcode||'').includes(searchTerm);
+                    if (!searchMatch) return false;
+                    if (filters.supplier && i.supplier !== filters.supplier) return false;
+                    if (filters.barcode === 'has' && !(i.barcode || i.boxBarcode)) return false;
+                    if (filters.barcode === 'missing' && (i.barcode || i.boxBarcode)) return false;
+                    if (filters.info === 'has' && !i.info) return false;
+                    if (filters.info === 'missing' && i.info) return false;
+                    return true;
+                }).sort((a, b) => {
+                    switch(filters.sort) {
+                        case 'price_asc': return (parseFloat(a.price)||0) - (parseFloat(b.price)||0);
+                        case 'price_desc': return (parseFloat(b.price)||0) - (parseFloat(a.price)||0);
+                        case 'stock_asc': return (parseFloat(a.stock)||0) - (parseFloat(b.stock)||0);
+                        case 'stock_desc': return (parseFloat(b.stock)||0) - (parseFloat(a.stock)||0);
+                        case 'name_desc': return (b.name||'').localeCompare(a.name||'');
+                        default: return (a.name||'').localeCompare(b.name||''); 
+                    }
+                });
+            }, [inventory, searchTerm, filters]);
+
+            const openScanner = (context) => { setScanContext(context); setScannerOpen(true); };
+            const openAddModal = () => { setEditingItem(null); setActiveScanResult(null); setModalOpen(true); };
+            const openEditModal = (item) => { setEditingItem(item); setActiveScanResult(null); setModalOpen(true); };
+
+            const handleScan = (txt) => {
+                setScannerOpen(false);
+                
+                if (scanContext && scanContext.startsWith('edit_')) {
+                    const field = scanContext.split('_')[1]; 
+                    setActiveScanResult({ field: field, value: txt });
+                } else {
+                    const itemSingle = inventory.find(i => i.barcode === txt);
+                    const itemBox = inventory.find(i => i.boxBarcode && i.boxBarcode === txt);
+                    
+                    if (itemBox) {
+                        setScanResultData({ item: itemBox, isBox: true });
+                    } else if (itemSingle) {
+                        setScanResultData({ item: itemSingle, isBox: false });
+                    } else {
+                        if (scanContext === 'search') {
+                            alert("Unbekannter Barcode: " + txt);
+                        }
+                    }
+                }
+            };
+
+            const handleScanConsume = (totalToConsume) => {
+                if (scanResultData && scanResultData.item) {
+                    updateStock(scanResultData.item.id, scanResultData.item.stock || 0, -Math.abs(totalToConsume), scanResultData.item.name);
+                    setScanResultData(null);
+                }
+            };
+
+            const handleScanInfo = () => {
+                if (scanResultData && scanResultData.item) {
+                    setViewingInfoItem(scanResultData.item);
+                    setScanResultData(null);
+                }
+            };
+
+            return (
+                <div className="max-w-6xl mx-auto p-4 md:p-6">
+                    <div className="glass-panel p-3 md:p-4 rounded-xl flex flex-col md:flex-row justify-between items-center mb-6 sticky top-2 z-50 gap-4 shadow-2xl no-print">
+                        <div className="flex items-center gap-3 w-full md:w-auto">
+                            <div className="p-2 md:p-3 bg-gradient-to-br from-amber-500 to-orange-600 rounded-xl shadow-lg"><Icon name="wine" className="text-white" size={20} /></div>
+                            <h1 className="text-lg md:text-xl font-bold flex items-center gap-2 text-white">BAR MANAGER
+                                {status === 'synced' && <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_#22c55e]" title="Online Synced"></span>}
+                                {status === 'connecting' && <span className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" title="Verbinde..."></span>}
+                                {status === 'offline_data' && <span className="w-2 h-2 bg-blue-500 rounded-full" title="Offline Mode (Lokale Daten)"></span>}
+                                {status === 'offline_pending' && <span className="w-2 h-2 bg-purple-500 rounded-full animate-pulse" title="Offline Änderungen warten auf Sync..."></span>}
+                            </h1>
+                        </div>
+                        <div className="flex bg-slate-900/50 p-1.5 rounded-xl w-full md:w-auto overflow-x-auto">
+                            {['inventory', 'dashboard', 'shopping', 'logs', 'settings'].map(tab => (
+                                <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 md:flex-none px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-all ${activeTab === tab ? 'bg-slate-700 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>
+                                    <Icon name={tab === 'inventory' ? 'list' : tab === 'dashboard' ? 'layout-dashboard' : tab === 'shopping' ? 'shopping-cart' : tab === 'logs' ? 'history' : 'settings'} size={16} />
+                                    <span className="capitalize hidden md:inline">{tab === 'inventory' ? 'Lager' : tab === 'dashboard' ? 'Cockpit' : tab === 'shopping' ? 'Einkauf' : tab === 'logs' ? 'Protokoll' : 'Einstellung'}</span>
+                                    {tab === 'shopping' && (stats.lowStockItems.length + extraOrders.length) > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 rounded-full">{stats.lowStockItems.length + extraOrders.length}</span>}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <main>
+                        {activeTab === 'inventory' && (
+                            <div className="space-y-6 animate-in fade-in">
+                                <div className="flex gap-2 w-full">
+                                    <div className="relative flex-grow">
+                                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500"><Icon name="search" size={20} /></div>
+                                        <input className="w-full bg-slate-900/80 border border-slate-700/50 rounded-xl py-4 pl-12 pr-4 text-white placeholder-slate-500 focus:ring-2 focus:ring-amber-500 outline-none" 
+                                            placeholder="Suche..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                                    </div>
+                                    <button onClick={() => setFilterOpen(true)} className={`bg-slate-800 border border-slate-700 hover:bg-slate-700 text-white px-4 rounded-xl flex items-center justify-center transition-all ${filters.supplier || filters.barcode !== 'all' || filters.info !== 'all' || filters.sort !== 'name_asc' ? 'border-amber-500 text-amber-500' : ''}`}><Icon name="filter" size={24} /></button>
+                                    <button onClick={() => openScanner('search')} className="bg-slate-800 border border-slate-700 hover:bg-slate-700 text-white px-4 rounded-xl flex items-center justify-center transition-all"><Icon name="scan-barcode" size={24} /></button>
+                                    <button onClick={openAddModal} className="bg-amber-500 hover:bg-amber-400 text-slate-900 px-5 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-amber-900/20 transition-all active:scale-95 whitespace-nowrap"><Icon name="plus" size={20} /> <span className="inline">Neu</span></button>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                    {filtered.slice(0, visibleItems).map(item => <ItemCard key={item.id} item={item} onUpd={updateStock} onDel={deleteItem} onEdit={openEditModal} onInfo={(item) => setViewingInfoItem(item)} consumptionAvg={consumptionStats.perArticle[item.name]?.avgPerMonth} />)}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'dashboard' && <DashboardContent stats={stats} vatRate={vatRate} setVatRate={setVatRate} consumptionStats={consumptionStats} consumptionPeriod={consumptionPeriod} setConsumptionPeriod={setConsumptionPeriod} consumptionLoading={consumptionLoading} />}
+                        
+                        {activeTab === 'shopping' && (
+                            <ShoppingContent 
+                                stats={stats} 
+                                extraOrders={extraOrders}
+                                selectedOrderItems={selectedOrderItems} 
+                                orderQuantities={orderQuantities} 
+                                toggleOrderItem={toggleOrderItem} 
+                                updateOrderQuantity={updateOrderQuantity} 
+                                selectAllOrders={selectAllOrders} 
+                                processOrder={processOrder}
+                                deleteManualOrder={deleteManualOrder}
+                                openManualOrderModal={() => setManualOrderModalOpen(true)}
+                            />
+                        )}
+                        
+                        {activeTab === 'logs' && <LogsContent logs={logs} onFetchPeriod={fetchLogsForPeriod} />}
+                        {activeTab === 'settings' && <SettingsContent categories={categories} suppliers={suppliers} addCategory={addCategory} deleteCategory={deleteCategory} addSupplier={addSupplier} deleteSupplier={deleteSupplier} resetCategories={resetCategories} exportCSV={exportCSV} />}
+                    </main>
+
+                    {modalOpen && <ItemModal isOpen={modalOpen} onClose={() => setModalOpen(false)} onSave={saveItem} categories={categories} suppliers={suppliers} initialData={editingItem} scannedCode={activeScanResult} onScanRequest={(field) => openScanner(`edit_${field}`)} />}
+                    {scannerOpen && <ScannerModal onClose={() => setScannerOpen(false)} onScan={handleScan} />}
+                    {manualOrderModalOpen && <ManualOrderModal isOpen={manualOrderModalOpen} onClose={() => setManualOrderModalOpen(false)} onSave={addManualOrder} inventory={inventory} />}
+                    {viewingInfoItem && <InfoModal isOpen={!!viewingInfoItem} onClose={() => setViewingInfoItem(null)} item={viewingInfoItem} />}
+                    {scanResultData && <ScanResultModal data={scanResultData} onClose={() => setScanResultData(null)} onConsume={handleScanConsume} onInfo={handleScanInfo} />}
+                    {filterOpen && <FilterModal isOpen={filterOpen} onClose={() => setFilterOpen(false)} filters={filters} setFilters={setFilters} suppliers={suppliers} />}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        const startReact = () => root.render(<App />);
+
+        if (window.fb) {
+            startReact();
+        } else {
+            window.addEventListener('firebase-ready', startReact);
+        }
+    </script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').then(reg => {
+                    console.log('Service Worker registriert: ', reg);
+                    reg.onupdatefound = () => {
+                        const installingWorker = reg.installing;
+                        installingWorker.onstatechange = () => {
+                            if (installingWorker.state === 'installed') {
+                                if (navigator.serviceWorker.controller) {
+                                    console.log('Neue Version verfügbar. Bitte neu laden.');
+                                }
+                            }
+                        };
+                    };
+                }).catch(err => console.log('Service Worker Fehler: ', err));
+            });
+        }
+    </script>
+</body>
+</html>
